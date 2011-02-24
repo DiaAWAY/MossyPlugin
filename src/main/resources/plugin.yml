@@ -1,0 +1,16 @@
+name: MossyPlugin
+main: no.diaaway.mossy.MossyPlugin
+version: 0.1
+author: DiaAWAY
+website: http://github.com/diaaway
+
+description: >
+             Plugin that grows moss on cobblestone
+
+commands:
+  reloadCobblestone:
+    description: A command that fetches cobblestone from the world(s).
+      Warning! This is only needed to do the first time you install the plugin.
+    usage: |
+           /<command>
+           Example: /reloadCobblestone
