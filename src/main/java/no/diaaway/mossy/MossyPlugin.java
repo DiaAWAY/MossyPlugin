@@ -24,7 +24,6 @@ public class MossyPlugin extends JavaPlugin {
     public iProperty mossing = new iProperty(this.getClass().getSimpleName() + ".properties");
     private MossyBlockListener blockListener = new MossyBlockListener(this);
     private MossyChunkListener chunkListener = new MossyChunkListener(this);
-    //private ArrayList<Block> cobblestone = new ArrayList<Block>();
     private ConcurrentHashMap cobblestones = new ConcurrentHashMap();
     private int growTimerId;
     private String growrate = "growrate";
@@ -56,27 +55,25 @@ public class MossyPlugin extends JavaPlugin {
         }
 
         // LOAD ALL COBBLESTONE OBJECTS FROM THE WORLD INTO THE ARRAY
+        // TODO: find out why no cobblestones are found D:
         getServer().getScheduler().scheduleAsyncDelayedTask(this, new Runnable() {
 
             public void run() {
-                int cobbles = 0;
                 for (int w = 0; w < getServer().getWorlds().size(); w++) {
                     Chunk[] chunks = getServer().getWorlds().get(w).getLoadedChunks();
-                    System.out.println("loaded chunks: " + chunks.length);
                     for (int i = 0; i < chunks.length; i++) {
                         for (int x = 0; x < 16; x++) {
                             for (int y = 0; y < 128; y++) {
                                 for (int z = 0; z < 16; z++) {
-                                    if (getServer().getWorlds().get(w).getBlockTypeIdAt(chunks[i].getX() + x, y, chunks[i].getZ() + z) != 0) {
+                                    if (getServer().getWorlds().get(w).getBlockTypeIdAt(chunks[i].getX() + x, y, chunks[i].getZ() + z)
+                                            == Material.COBBLESTONE.getId()) {
                                         addCobblestone(getServer().getWorlds().get(w).getBlockAt(x, y, z));
-                                        cobbles += 1;
-                                        System.out.println("adding cobblestone");
                                     }
                                 }
                             }
                         }
                     }
-                    System.out.println(cobbles + " cobblestone(s) loaded");
+                    System.out.println(cobblestones.size() + " cobblestone(s) loaded");
                 }
             }
         }, 0L);
@@ -88,7 +85,9 @@ public class MossyPlugin extends JavaPlugin {
                 new Runnable() { // 
 
                     public void run() {
-                        growMoss();
+                        if (cobblestones.size() > 0) { // dont need to work on empty list
+                            growMoss();
+                        }
                     }
                 },
                 0L, // start delay
@@ -97,82 +96,107 @@ public class MossyPlugin extends JavaPlugin {
         // Notify admin that all went well
         PluginDescriptionFile pdfFile = this.getDescription();
         System.out.println(pdfFile.getName() + " version " + pdfFile.getVersion() + " is enabled!");
+        System.out.println(pdfFile.getName() + " version " + pdfFile.getVersion() + " is looking for cobblestones!");
     }
 
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String commandLabel, String[] args) {
-        // RELOAD PROPERTIES FILE
-            /*
-        getServer().getScheduler().cancelTask(growTimerId);
-         */
+
         return false;
     }
 
-    protected synchronized Object addCobblestone(Block block) {
+    protected Object addCobblestone(Block block) {
         System.out.println(this.getDescription().getName() + ": Adding block");
         return cobblestones.putIfAbsent(block, 0L);
     }
 
-    protected synchronized Object removeCobblestone(Block block) {
-        System.out.println(this.getDescription().getName() + ": Removing block");
+    protected Object removeCobblestone(Block block) {
+        if (cobblestones.containsKey(block)) {
+            System.out.println(this.getDescription().getName() + ": Removing block");
+        }
         return cobblestones.remove(block);
     }
 
     /**
      * Finds a suitable cobblestone block and grows moss on it.
      */
-    protected synchronized void growMoss() {
-        System.out.println(this.getDescription().getName() + ": Growing moss");
+    protected void growMoss() {
         // loop through the cobblestones
         Iterator i = cobblestones.keySet().iterator();
         Block block;
 
         while (i.hasNext()) {
             block = (Block) i.next();
-            System.out.println("water:" + isNear(block, Material.WATER) + " moss:" + isNear(block, Material.MOSSY_COBBLESTONE));
-            if (isNear(block, Material.WATER) || isNear(block, Material.MOSSY_COBBLESTONE)) {
+            if (isNear(block, Material.WATER)
+                    || isNear(block, Material.STATIONARY_WATER)
+                    || isNear(block, Material.MOSSY_COBBLESTONE)) {
                 long age = (Long) cobblestones.get(block);
                 if (age > mossing.getLong(growthreshold)) {
-                    java.util.Random r = new java.util.Random();
+                    java.util.Random r = new java.util.Random(); // find a better way to do this when icba
                     if (r.nextBoolean() && r.nextBoolean() && r.nextBoolean()) { // randumb chance (0.5*0.5*0.5=0,125 => 12.5 % growth chance
                         block.getWorld().getBlockAt(block.getLocation()).setType(Material.MOSSY_COBBLESTONE);
                         removeCobblestone(block);
-                        System.out.println("block was changed");
                     } else {
-                        System.out.println("threshold met, but moss didn't grow");
                     }
                 } else {
-                    System.out.println("aging block");
                     cobblestones.replace(block, age, age + 1);
                 }
             }
         }
     }
 
-    private boolean isNear(Block block, Material material) {
-        System.out.println(block.getFace(BlockFace.NORTH).getType().toString());
-        System.out.println(block.getFace(BlockFace.SOUTH).getType().toString());
-        System.out.println(block.getFace(BlockFace.EAST).getType().toString());
-        System.out.println(block.getFace(BlockFace.WEST).getType().toString());
-        System.out.println(block.getFace(BlockFace.UP).getType().toString());
-        if (block.getFace(BlockFace.NORTH).getType().equals(material)) {
-            return true;
+    /**
+     * checks if any blocks adjacent to the block is of the material provided
+     * This method assumes that adjacent means blocks that in these cords:
+     * x=x-1, y=y-1; z=z-1 to x=x+1, y=y+1; z=z+1, i.e. a cube with the block
+     * in the middle.
+     *
+     * @param block
+     * @param material
+     * @return
+     */
+    protected boolean isNear(Block block, Material material) {
+        // TODO rewrite isNear and isNearHelper
+        boolean isNear = (isNearHelper(block, material)
+                || isNearHelper(block.getFace(BlockFace.UP), material)
+                || isNearHelper(block.getFace(BlockFace.DOWN), material));
+        return isNear;
+    }
+
+    private boolean isNearHelper(Block block, Material material) {
+        boolean isNear = false;
+        // todo: rewrite this method so that it isn't shitty coded
+
+        // if self is of material type, self is near material
+        if (!isNear && block.getFace(BlockFace.SELF).getType().equals(material)) {
+            isNear = true;
         }
-        if (block.getFace(BlockFace.SOUTH).getType().equals(material)) {
-            return true;
+
+        // check adjacent blocks, horizontal plane
+        if (!isNear && block.getFace(BlockFace.NORTH).getType().equals(material)) {
+            isNear = true;
         }
-        if (block.getFace(BlockFace.EAST).getType().equals(material)) {
-            return true;
+        if (!isNear && block.getFace(BlockFace.NORTH_EAST).getType().equals(material)) {
+            isNear = true;
         }
-        if (block.getFace(BlockFace.WEST).getType().equals(material)) {
-            return true;
+        if (!isNear && block.getFace(BlockFace.NORTH_WEST).getType().equals(material)) {
+            isNear = true;
         }
-        if (block.getFace(BlockFace.UP).getType().equals(material)) {
-            return true;
+        if (!isNear && block.getFace(BlockFace.SOUTH).getType().equals(material)) {
+            isNear = true;
         }
-        if (block.getFace(BlockFace.DOWN).getType().equals(material)) {
-            return true;
+        if (!isNear && block.getFace(BlockFace.SOUTH_EAST).getType().equals(material)) {
+            isNear = true;
         }
-        return false;
+        if (!isNear && block.getFace(BlockFace.SOUTH_WEST).getType().equals(material)) {
+            isNear = true;
+        }
+        if (!isNear && block.getFace(BlockFace.EAST).getType().equals(material)) {
+            isNear = true;
+        }
+        if (!isNear && block.getFace(BlockFace.WEST).getType().equals(material)) {
+            isNear = true;
+        }
+        return isNear;
     }
 }
